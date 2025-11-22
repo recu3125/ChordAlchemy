@@ -691,16 +691,14 @@ function identifyScaleFromNotes(noteItems) {
     .map((el) => {
       const midi = noteToMidi(el.dataset.note);
       if (midi == null) return null;
-      const rect = el.getBoundingClientRect();
       return {
         el,
         midi,
-        name: el.dataset.note,
-        centerX: rect.left + rect.width / 2
+        name: el.dataset.note
       };
     })
     .filter(Boolean)
-    .sort((a, b) => a.centerX - b.centerX);
+    .sort((a, b) => a.midi - b.midi);
 
   if (noteData.length < minLength) return null;
 
