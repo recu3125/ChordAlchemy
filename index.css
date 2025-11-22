@@ -189,6 +189,10 @@ html, body {
 }
 
 @media (max-width: 900px), (orientation: portrait) {
+  #speedLabel {
+    display: none;
+  }
+
   #playArea {
     padding-bottom: var(--mobile-palette-padding);
   }
