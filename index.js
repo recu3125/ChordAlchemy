@@ -27,6 +27,24 @@ const baseColors = {
 const namesSharpPC = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
 const namesFlatPC  = ["C","Db","D","Eb","E","F","Gb","G","Ab","A","Bb","B"];
 
+const scalePatterns = [
+  { id: "major", label: "major", offsets: [0, 2, 4, 5, 7, 9, 11] },
+  { id: "dorian", label: "dorian", offsets: [0, 2, 3, 5, 7, 9, 10] },
+  { id: "phrygian", label: "phrygian", offsets: [0, 1, 3, 5, 7, 8, 10] },
+  { id: "lydian", label: "lydian", offsets: [0, 2, 4, 6, 7, 9, 11] },
+  { id: "mixolydian", label: "mixolydian", offsets: [0, 2, 4, 5, 7, 9, 10] },
+  { id: "naturalMinor", label: "natural minor", offsets: [0, 2, 3, 5, 7, 8, 10] },
+  { id: "locrian", label: "locrian", offsets: [0, 1, 3, 5, 6, 8, 10] },
+  { id: "harmonicMinor", label: "harmonic minor", offsets: [0, 2, 3, 5, 7, 8, 11] },
+  { id: "locrianSharp6", label: "locrian ♮6", offsets: [0, 1, 3, 5, 6, 9, 10] },
+  { id: "ionianSharp5", label: "ionian ♯5", offsets: [0, 2, 4, 5, 8, 9, 11] },
+  { id: "dorianSharp4", label: "dorian ♯4", offsets: [0, 2, 3, 6, 7, 9, 10] },
+  { id: "phrygianDominant", label: "phrygian dominant", offsets: [0, 1, 4, 5, 7, 8, 10] },
+  { id: "lydianSharp2", label: "lydian ♯2", offsets: [0, 3, 4, 6, 7, 9, 11] },
+  { id: "ultralocrian", label: "ultralocrian", offsets: [0, 1, 3, 4, 6, 8, 9] },
+  { id: "blues", label: "blues", offsets: [0, 3, 5, 6, 7, 10] }
+];
+
 const MIN_OCTAVE = 1;
 const MAX_OCTAVE = 7;
 
@@ -358,6 +376,19 @@ function createOctaveItem(octDir, x, y) {
   return el;
 }
 
+function createScaleItem(scaleInfo, x, y) {
+  const el = document.createElement("div");
+  el.className = "item scale";
+  el.dataset.type = "scale";
+  el.dataset.scaleName = scaleInfo.name;
+  el.dataset.notes = scaleInfo.notes.join(",");
+  el.textContent = scaleInfo.name;
+  playArea.appendChild(el);
+  positionItem(el, x, y);
+  registerItem(el);
+  return el;
+}
+
 const chordTemplates = [
   { id: "maj",    suffix: "",          intervals: [0, 4, 7],       quality: [4] },
   { id: "min",    suffix: "m",         intervals: [0, 3, 7],       quality: [3] },
@@ -632,6 +663,124 @@ function createChordItem(notes, x, y) {
   return el;
 }
 
+function toDisplayScaleRoot(noteName) {
+  return toDisplayName(noteName).replace("#", "♯").replace("b", "♭");
+}
+
+function getNoteItems() {
+  return items.filter((el) => el.dataset.type === "note");
+}
+
+function getPitchItems() {
+  return items.filter((el) => el.dataset.type === "note" || el.dataset.type === "chord");
+}
+
+function identifyScaleFromNotes(noteItems) {
+  const validLengthsSet = new Set();
+  scalePatterns.forEach((p) => {
+    validLengthsSet.add(p.offsets.length);
+    validLengthsSet.add(p.offsets.length + 1);
+  });
+
+  const validLengths = Array.from(validLengthsSet).sort((a, b) => b - a);
+  const minLength = validLengths[validLengths.length - 1] || 0;
+
+  if (noteItems.length < minLength) return null;
+
+  const noteData = noteItems
+    .map((el) => {
+      const midi = noteToMidi(el.dataset.note);
+      if (midi == null) return null;
+      const rect = el.getBoundingClientRect();
+      return {
+        el,
+        midi,
+        name: el.dataset.note,
+        centerX: rect.left + rect.width / 2
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.centerX - b.centerX);
+
+  if (noteData.length < minLength) return null;
+
+  for (const length of validLengths) {
+    if (noteData.length < length) continue;
+
+    for (let start = 0; start + length <= noteData.length; start++) {
+      const window = noteData.slice(start, start + length);
+      let strictlyAscending = true;
+      for (let i = 1; i < window.length; i++) {
+        if (window[i].midi <= window[i - 1].midi) {
+          strictlyAscending = false;
+          break;
+        }
+      }
+      if (!strictlyAscending) continue;
+
+      const firstMidi = window[0].midi;
+      const intervals = window.map((d) => d.midi - firstMidi);
+
+      for (const p of scalePatterns) {
+        const fullOffsets =
+          intervals.length === p.offsets.length + 1 ? [...p.offsets, 12] : p.offsets;
+        if (fullOffsets.length !== intervals.length) continue;
+        const ok = intervals.every((iv, idx) => iv === fullOffsets[idx]);
+        if (!ok) continue;
+
+        const rootNote = midiToNote(firstMidi);
+        return {
+          modeId: p.id,
+          modeLabel: p.label,
+          rootNote,
+          notes: window.map((d) => d.name)
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+function ensureScaleElements() {
+  const existingScaleItems = items.filter((el) => el.dataset.type === "scale");
+  const noteItems = getNoteItems();
+
+  const scaleInfo = identifyScaleFromNotes(noteItems);
+  if (!scaleInfo) {
+    existingScaleItems.forEach((el) => removeItem(el));
+    return;
+  }
+
+  const name = `${toDisplayScaleRoot(scaleInfo.rootNote)} ${scaleInfo.modeLabel} scale`;
+
+  const areaRect = playArea.getBoundingClientRect();
+  const centers = noteItems.map((el) => {
+    const rect = el.getBoundingClientRect();
+    return {
+      x: rect.left + rect.width / 2 - areaRect.left,
+      y: rect.top + rect.height / 2 - areaRect.top
+    };
+  });
+
+  const avgX = centers.reduce((acc, c) => acc + c.x, 0) / centers.length;
+  const avgY = centers.reduce((acc, c) => acc + c.y, 0) / centers.length;
+
+  let scaleEl = existingScaleItems[0];
+  const info = { name, notes: scaleInfo.notes };
+
+  if (!scaleEl) {
+    scaleEl = createScaleItem(info, avgX - 36, avgY - 36);
+  } else {
+    scaleEl.dataset.scaleName = name;
+    scaleEl.dataset.notes = info.notes.join(",");
+    scaleEl.textContent = name;
+    positionItem(scaleEl, avgX - scaleEl.offsetWidth / 2, avgY - scaleEl.offsetHeight / 2);
+  }
+
+  existingScaleItems.slice(1).forEach((el) => removeItem(el));
+}
+
 function updateSelectionStyles() {
   items.forEach((el) => {
     if (selectedItems.has(el)) el.classList.add("selected");
@@ -650,6 +799,13 @@ function playElement(el) {
     notes.forEach((n) => {
       const freq = noteToFreq(n);
       if (freq) playPiano(freq, 0.8, 0.28);
+    });
+  } else if (type === "scale") {
+    const notes = (el.dataset.notes || "").split(",").filter(Boolean);
+    notes.forEach((n, idx) => {
+      const freq = noteToFreq(n);
+      if (!freq) return;
+      setTimeout(() => playPiano(freq, 0.5, 0.22), idx * 90);
     });
   } else if (type === "accidental") {
     if (el.dataset.accType === "sharp") playKick();
@@ -684,6 +840,14 @@ function serializeItem(el) {
     return { type, accType: el.dataset.accType, left, top };
   } else if (type === "octave") {
     return { type, octDir: el.dataset.octDir, left, top };
+  } else if (type === "scale") {
+    return {
+      type,
+      scaleName: el.dataset.scaleName,
+      notes: (el.dataset.notes || "").split(",").filter(Boolean),
+      left,
+      top
+    };
   }
   return null;
 }
@@ -701,6 +865,12 @@ function restoreItem(data) {
     return createAccidentalItem(data.accType, data.left, data.top);
   } else if (data.type === "octave") {
     return createOctaveItem(data.octDir, data.left, data.top);
+  } else if (data.type === "scale") {
+    const info = {
+      name: data.scaleName || "Scale",
+      notes: data.notes || []
+    };
+    return createScaleItem(info, data.left, data.top);
   }
   return null;
 }
@@ -732,6 +902,8 @@ function undoLast() {
     selectedItems = new Set(restored);
     updateSelectionStyles();
   }
+
+  ensureScaleElements();
 }
 
 // ---- Double-click duplicate ----
@@ -752,6 +924,7 @@ function duplicateFromElement(el) {
     selectedItems = new Set(newEls);
     updateSelectionStyles();
     pushUndo({ type: "add", els: newEls });
+    ensureScaleElements();
   }
 }
 
@@ -937,17 +1110,21 @@ function tryCombineItem(anchorEl) {
     const typeA = anchorEl.dataset.type;
     const typeB = other.dataset.type;
 
+    if (typeA === "scale" || typeB === "scale") continue;
+
     // Accidentals
     if (typeA === "accidental" && (typeB === "note" || typeB === "chord")) {
       applyAccidentalToPitchItem(other, anchorEl.dataset.accType);
       removeItem(anchorEl);
       playElement(other);
+      ensureScaleElements();
       return;
     }
     if (typeB === "accidental" && (typeA === "note" || typeA === "chord")) {
       applyAccidentalToPitchItem(anchorEl, other.dataset.accType);
       removeItem(other);
       playElement(anchorEl);
+      ensureScaleElements();
       return;
     }
 
@@ -956,12 +1133,14 @@ function tryCombineItem(anchorEl) {
       applyOctaveToPitchItem(other, anchorEl.dataset.octDir);
       removeItem(anchorEl);
       playElement(other);
+      ensureScaleElements();
       return;
     }
     if (typeB === "octave" && (typeA === "note" || typeA === "chord")) {
       applyOctaveToPitchItem(anchorEl, other.dataset.octDir);
       removeItem(other);
       playElement(anchorEl);
+      ensureScaleElements();
       return;
     }
 
@@ -978,13 +1157,13 @@ function tryCombineItem(anchorEl) {
     if (notesA.length === 0 || notesB.length === 0) continue;
 
     const rectA = anchorEl.getBoundingClientRect();
-    the_rectB = other.getBoundingClientRect();
+    const rectB = other.getBoundingClientRect();
     const areaRect = playArea.getBoundingClientRect();
     const centerX =
-      (rectA.left + rectA.width / 2 + the_rectB.left + the_rectB.width / 2) / 2 -
+      (rectA.left + rectA.width / 2 + rectB.left + rectB.width / 2) / 2 -
       areaRect.left;
     const centerY =
-      (rectA.top + rectA.height / 2 + the_rectB.top + the_rectB.height / 2) / 2 -
+      (rectA.top + rectA.height / 2 + rectB.top + rectB.height / 2) / 2 -
       areaRect.top;
 
     const combinedNotes = Array.from(new Set([...notesA, ...notesB]));
@@ -1001,6 +1180,7 @@ function tryCombineItem(anchorEl) {
     pushUndo({ type: "combine", created: [newChord], removed: removedData });
 
     playElement(newChord);
+    ensureScaleElements();
     updateSelectionStyles();
     break;
   }
@@ -1034,6 +1214,7 @@ function onDragMouseUp(e) {
     tryCombineItem(dragState.items[0].el);
   }
 
+  ensureScaleElements();
   dragState = null;
 }
 
@@ -1385,6 +1566,7 @@ function handlePaste() {
     selectedItems = new Set(newEls);
     updateSelectionStyles();
     pushUndo({ type: "add", els: newEls });
+    ensureScaleElements();
   }
 }
 
