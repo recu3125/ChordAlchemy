@@ -11,6 +11,44 @@ const hoverTooltip = document.createElement("div");
 hoverTooltip.id = "hoverTooltip";
 document.body.appendChild(hoverTooltip);
 
+const mobilePaletteQuery = window.matchMedia("(max-width: 900px), (orientation: portrait)");
+
+function updateMobilePalettePadding() {
+  if (!palette) return;
+  if (!mobilePaletteQuery.matches) {
+    document.documentElement.style.removeProperty("--mobile-palette-padding");
+    return;
+  }
+
+  const paletteRect = palette.getBoundingClientRect();
+  const clampedHeight = Math.min(paletteRect.height || 0, window.innerHeight * 0.3);
+  if (clampedHeight > 0) {
+    document.documentElement.style.setProperty("--mobile-palette-padding", `${clampedHeight}px`);
+  }
+}
+
+mobilePaletteQuery.addEventListener("change", updateMobilePalettePadding);
+window.addEventListener("resize", updateMobilePalettePadding);
+window.addEventListener("orientationchange", updateMobilePalettePadding);
+
+if (typeof ResizeObserver !== "undefined" && palette) {
+  const paletteObserver = new ResizeObserver(updateMobilePalettePadding);
+  paletteObserver.observe(palette);
+}
+
+function getClientPoint(e) {
+  if (e.touches && e.touches.length) {
+    return { x: e.touches[0].clientX, y: e.touches[0].clientY };
+  }
+  if (e.changedTouches && e.changedTouches.length) {
+    return { x: e.changedTouches[0].clientX, y: e.changedTouches[0].clientY };
+  }
+  if (e.clientX != null && e.clientY != null) {
+    return { x: e.clientX, y: e.clientY };
+  }
+  return null;
+}
+
 let items = [];
 let selectedItems = new Set();
 
@@ -358,7 +396,8 @@ function positionItem(el, x, y) {
 
 function registerItem(el) {
   items.push(el);
-  el.addEventListener("mousedown", onItemMouseDown);
+  el.addEventListener("mousedown", onItemPointerDown);
+  el.addEventListener("touchstart", onItemPointerDown, { passive: false });
   el.addEventListener("dblclick", onItemDoubleClick);
   el.addEventListener("mouseenter", onItemHoverStart);
   el.addEventListener("mouseleave", onItemHoverEnd);
@@ -869,7 +908,25 @@ playArea.addEventListener(
 // ------- Dragging items -------
 let dragState = null;
 
-function onItemMouseDown(e) {
+function addDragListeners() {
+  document.addEventListener("mousemove", onDragPointerMove);
+  document.addEventListener("mouseup", onDragPointerUp);
+  document.addEventListener("touchmove", onDragPointerMove, { passive: false });
+  document.addEventListener("touchend", onDragPointerUp);
+  document.addEventListener("touchcancel", onDragPointerUp);
+}
+
+function removeDragListeners() {
+  document.removeEventListener("mousemove", onDragPointerMove);
+  document.removeEventListener("mouseup", onDragPointerUp);
+  document.removeEventListener("touchmove", onDragPointerMove);
+  document.removeEventListener("touchend", onDragPointerUp);
+  document.removeEventListener("touchcancel", onDragPointerUp);
+}
+
+function onItemPointerDown(e) {
+  const point = getClientPoint(e);
+  if (!point) return;
   e.preventDefault();
   e.stopPropagation();
   const el = e.currentTarget;
@@ -884,8 +941,8 @@ function onItemMouseDown(e) {
 
   playElement(el);
 
-  const startX = e.clientX;
-  const startY = e.clientY;
+  const startX = point.x;
+  const startY = point.y;
   const dragItems = Array.from(selectedItems);
 
   dragState = {
@@ -898,8 +955,7 @@ function onItemMouseDown(e) {
     }))
   };
 
-  document.addEventListener("mousemove", onDragMouseMove);
-  document.addEventListener("mouseup", onDragMouseUp);
+  addDragListeners();
 }
 
 function onItemHoverStart(e) {
@@ -912,10 +968,13 @@ function onItemHoverEnd() {
   cancelHoverTooltip();
 }
 
-function onDragMouseMove(e) {
+function onDragPointerMove(e) {
   if (!dragState) return;
-  const dx = e.clientX - dragState.startX;
-  const dy = e.clientY - dragState.startY;
+  const point = getClientPoint(e);
+  if (!point) return;
+  if (e.cancelable) e.preventDefault();
+  const dx = point.x - dragState.startX;
+  const dy = point.y - dragState.startY;
 
   dragState.items.forEach((it) => {
     let newLeft = it.left + dx;
@@ -1072,14 +1131,18 @@ function tryCombineItem(anchorEl) {
   }
 }
 
-function onDragMouseUp(e) {
+function onDragPointerUp(e) {
   if (!dragState) return;
-  document.removeEventListener("mousemove", onDragMouseMove);
-  document.removeEventListener("mouseup", onDragMouseUp);
+  removeDragListeners();
+  const point = getClientPoint(e);
+  if (!point) {
+    dragState = null;
+    return;
+  }
 
   const paletteRect = palette.getBoundingClientRect();
-  const cx = e.clientX;
-  const cy = e.clientY;
+  const cx = point.x;
+  const cy = point.y;
 
   if (
     cx >= paletteRect.left &&
@@ -1127,12 +1190,14 @@ function stylePaletteNotes() {
 function setupPaletteDrag() {
   // Notes
   document.querySelectorAll(".palette-note").forEach((p) => {
-    p.addEventListener("mousedown", (e) => {
+    const startNoteDrag = (e) => {
+      const point = getClientPoint(e);
+      if (!point) return;
       e.preventDefault();
       const note = p.dataset.note;
       const areaRect = playArea.getBoundingClientRect();
-      const x = e.clientX - areaRect.left - 25;
-      const y = e.clientY - areaRect.top - 25;
+      const x = point.x - areaRect.left - 25;
+      const y = point.y - areaRect.top - 25;
 
       const item = createNoteItem(note, x, y);
       selectedItems.clear();
@@ -1142,8 +1207,8 @@ function setupPaletteDrag() {
       playElement(item);
       pushUndo({ type: "add", els: [item] });
 
-      const startX = e.clientX;
-      const startY = e.clientY;
+      const startX = point.x;
+      const startY = point.y;
       dragState = {
         startX,
         startY,
@@ -1155,19 +1220,22 @@ function setupPaletteDrag() {
           }
         ]
       };
-      document.addEventListener("mousemove", onDragMouseMove);
-      document.addEventListener("mouseup", onDragMouseUp);
-    });
+      addDragListeners();
+    };
+    p.addEventListener("mousedown", startNoteDrag);
+    p.addEventListener("touchstart", startNoteDrag, { passive: false });
   });
 
   // Accidentals
   document.querySelectorAll(".palette-acc").forEach((p) => {
-    p.addEventListener("mousedown", (e) => {
+    const startAccDrag = (e) => {
+      const point = getClientPoint(e);
+      if (!point) return;
       e.preventDefault();
       const accType = p.dataset.acc;
       const areaRect = playArea.getBoundingClientRect();
-      const x = e.clientX - areaRect.left - 20;
-      const y = e.clientY - areaRect.top - 20;
+      const x = point.x - areaRect.left - 20;
+      const y = point.y - areaRect.top - 20;
 
       const item = createAccidentalItem(accType, x, y);
       selectedItems.clear();
@@ -1177,8 +1245,8 @@ function setupPaletteDrag() {
       playElement(item);
       pushUndo({ type: "add", els: [item] });
 
-      const startX = e.clientX;
-      const startY = e.clientY;
+      const startX = point.x;
+      const startY = point.y;
       dragState = {
         startX,
         startY,
@@ -1190,19 +1258,22 @@ function setupPaletteDrag() {
           }
         ]
       };
-      document.addEventListener("mousemove", onDragMouseMove);
-      document.addEventListener("mouseup", onDragMouseUp);
-    });
+      addDragListeners();
+    };
+    p.addEventListener("mousedown", startAccDrag);
+    p.addEventListener("touchstart", startAccDrag, { passive: false });
   });
 
   // Octave tokens
   document.querySelectorAll(".palette-oct").forEach((p) => {
-    p.addEventListener("mousedown", (e) => {
+    const startOctDrag = (e) => {
+      const point = getClientPoint(e);
+      if (!point) return;
       e.preventDefault();
       const octDir = p.dataset.oct;
       const areaRect = playArea.getBoundingClientRect();
-      const x = e.clientX - areaRect.left - 22;
-      const y = e.clientY - areaRect.top - 22;
+      const x = point.x - areaRect.left - 22;
+      const y = point.y - areaRect.top - 22;
 
       const item = createOctaveItem(octDir, x, y);
       selectedItems.clear();
@@ -1212,8 +1283,8 @@ function setupPaletteDrag() {
       playElement(item);
       pushUndo({ type: "add", els: [item] });
 
-      const startX = e.clientX;
-      const startY = e.clientY;
+      const startX = point.x;
+      const startY = point.y;
       dragState = {
         startX,
         startY,
@@ -1225,9 +1296,10 @@ function setupPaletteDrag() {
           }
         ]
       };
-      document.addEventListener("mousemove", onDragMouseMove);
-      document.addEventListener("mouseup", onDragMouseUp);
-    });
+      addDragListeners();
+    };
+    p.addEventListener("mousedown", startOctDrag);
+    p.addEventListener("touchstart", startOctDrag, { passive: false });
   });
 }
 
@@ -1235,11 +1307,13 @@ function setupPaletteDrag() {
 let selectionState = null;
 
 playArea.addEventListener("mousedown", (e) => {
-  if (e.target !== playArea) return;
+  if (e.target !== playArea || selectionState) return;
   e.preventDefault();
+  const point = getClientPoint(e);
+  if (!point) return;
 
-  const startX = e.clientX;
-  const startY = e.clientY;
+  const startX = point.x;
+  const startY = point.y;
   const areaRect = playArea.getBoundingClientRect();
 
   selectionState = {
@@ -1255,18 +1329,20 @@ playArea.addEventListener("mousedown", (e) => {
   selectionBox.style.top = startY - areaRect.top + "px";
   selectionBox.style.width = "0px";
   selectionBox.style.height = "0px";
-
-  document.addEventListener("mousemove", onSelectionMouseMove);
-  document.addEventListener("mouseup", onSelectionMouseUp);
+  document.addEventListener("mousemove", onSelectionPointerMove);
+  document.addEventListener("mouseup", onSelectionPointerUp);
 });
 
-function onSelectionMouseMove(e) {
+function onSelectionPointerMove(e) {
   if (!selectionState) return;
+  const point = getClientPoint(e);
+  if (!point) return;
+  if (e.cancelable) e.preventDefault();
   const areaRect = selectionState.areaRect;
   const x1 = selectionState.startX;
   const y1 = selectionState.startY;
-  const x2 = e.clientX;
-  const y2 = e.clientY;
+  const x2 = point.x;
+  const y2 = point.y;
 
   const minX = Math.min(x1, x2);
   const minY = Math.min(y1, y2);
@@ -1315,10 +1391,10 @@ function onSelectionMouseMove(e) {
   selectionState.lastInside = new Set(currentInside);
 }
 
-function onSelectionMouseUp(e) {
+function onSelectionPointerUp() {
   if (!selectionState) return;
-  document.removeEventListener("mousemove", onSelectionMouseMove);
-  document.removeEventListener("mouseup", onSelectionMouseUp);
+  document.removeEventListener("mousemove", onSelectionPointerMove);
+  document.removeEventListener("mouseup", onSelectionPointerUp);
 
   selectionBox.style.display = "none";
 
@@ -1476,5 +1552,6 @@ helpOverlay.addEventListener("click", (e) => {
 // Init
 stylePaletteNotes();
 setupPaletteDrag();
+updateMobilePalettePadding();
 // Show help on first load
 showHelp();

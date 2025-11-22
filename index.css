@@ -1,3 +1,8 @@
+:root {
+  --mobile-palette-max-height: 30vh;
+  --mobile-palette-padding: 160px;
+}
+
 * {
   box-sizing: border-box;
   user-select: none;
@@ -10,11 +15,16 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+html, body {
+  height: 100%;
 }
 #app {
   display: flex;
   flex-direction: column;
   height: 100%;
+  overflow: hidden;
 }
 #toolbar {
   padding: 8px 12px;
@@ -22,6 +32,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  flex-wrap: wrap;
   border-bottom: 1px solid #1f2937;
   background: #020617;
   font-size: 12px;
@@ -30,11 +41,17 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: 1;
+  min-width: 0;
 }
 .toolbar-links {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  min-width: 0;
   color: #9ca3af;
   font-weight: 600;
 }
@@ -97,6 +114,7 @@ body {
   flex: 1;
   display: flex;
   min-height: 0;
+  overflow: hidden;
 }
 
 #playArea {
@@ -118,16 +136,23 @@ body {
   flex-direction: column;
   border-left: 1px solid #111827;
   z-index: 10;
+  overflow-y: auto;
 }
 #palette h3 {
   margin: 0 0 8px 0;
   font-size: 13px;
   color: #9ca3af;
 }
-.palette-notes {
+.palette-items {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+.palette-note,
+.palette-acc,
+.palette-oct {
+  aspect-ratio: 1 / 1;
+  flex: 0 0 44px;
 }
 .palette-note {
   width: 44px;
@@ -141,11 +166,6 @@ body {
   cursor: grab;
   border: 2px solid rgba(15, 23, 42, 0.7);
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
-}
-.palette-row {
-  margin-top: 10px;
-  display: flex;
-  gap: 8px;
 }
 .palette-acc,
 .palette-oct {
@@ -166,6 +186,44 @@ body {
 .palette-oct {
   font-size: 13px;
   font-weight: 600;
+}
+
+@media (max-width: 900px), (orientation: portrait) {
+  #playArea {
+    padding-bottom: var(--mobile-palette-padding);
+  }
+
+  #palette {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: auto;
+    max-height: var(--mobile-palette-max-height);
+    min-height: 140px;
+    border-left: none;
+    border-top: 1px solid #111827;
+    box-shadow: 0 -12px 24px rgba(0, 0, 0, 0.6);
+    overflow: hidden;
+  }
+
+  #palette h3 {
+    text-align: center;
+    margin-bottom: 10px;
+  }
+
+  .palette-items {
+    justify-content: flex-start;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    overflow-x: hidden;
+    overflow-y: auto;
+    width: 100%;
+    padding: 4px 2px 8px;
+    gap: 10px;
+    -webkit-overflow-scrolling: touch;
+  }
 }
 
 .item {
