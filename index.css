@@ -10,11 +10,16 @@ body {
   height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+}
+html, body {
+  height: 100%;
 }
 #app {
   display: flex;
   flex-direction: column;
   height: 100%;
+  overflow: hidden;
 }
 #toolbar {
   padding: 8px 12px;
@@ -22,6 +27,7 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  flex-wrap: wrap;
   border-bottom: 1px solid #1f2937;
   background: #020617;
   font-size: 12px;
@@ -30,11 +36,17 @@ body {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex: 1;
+  min-width: 0;
 }
 .toolbar-links {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  min-width: 0;
   color: #9ca3af;
   font-weight: 600;
 }
@@ -97,6 +109,7 @@ body {
   flex: 1;
   display: flex;
   min-height: 0;
+  overflow: hidden;
 }
 
 #playArea {
@@ -125,7 +138,7 @@ body {
   font-size: 13px;
   color: #9ca3af;
 }
-.palette-notes {
+.palette-items {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -142,11 +155,6 @@ body {
   cursor: grab;
   border: 2px solid rgba(15, 23, 42, 0.7);
   box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
-}
-.palette-row {
-  margin-top: 10px;
-  display: flex;
-  gap: 8px;
 }
 .palette-acc,
 .palette-oct {
@@ -171,7 +179,7 @@ body {
 
 @media (max-width: 900px), (orientation: portrait) {
   #playArea {
-    padding-bottom: 220px;
+    padding-bottom: 160px;
   }
 
   #palette {
@@ -179,19 +187,25 @@ body {
     bottom: 0;
     left: 0;
     width: 100%;
-    height: 220px;
+    height: 160px;
     border-left: none;
     border-top: 1px solid #111827;
     box-shadow: 0 -12px 24px rgba(0, 0, 0, 0.6);
+    overflow: hidden;
   }
 
   #palette h3 {
     text-align: center;
+    margin-bottom: 10px;
   }
 
-  .palette-notes,
-  .palette-row {
-    justify-content: center;
+  .palette-items {
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 6px;
+    gap: 10px;
   }
 }
 
