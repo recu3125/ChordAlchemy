@@ -1,3 +1,8 @@
+:root {
+  --mobile-palette-max-height: 30vh;
+  --mobile-palette-padding: 160px;
+}
+
 * {
   box-sizing: border-box;
   user-select: none;
@@ -143,6 +148,12 @@ html, body {
   flex-wrap: wrap;
   gap: 8px;
 }
+.palette-note,
+.palette-acc,
+.palette-oct {
+  aspect-ratio: 1 / 1;
+  flex: 0 0 44px;
+}
 .palette-note {
   width: 44px;
   height: 44px;
@@ -179,7 +190,7 @@ html, body {
 
 @media (max-width: 900px), (orientation: portrait) {
   #playArea {
-    padding-bottom: 160px;
+    padding-bottom: var(--mobile-palette-padding);
   }
 
   #palette {
@@ -187,7 +198,9 @@ html, body {
     bottom: 0;
     left: 0;
     width: 100%;
-    height: 160px;
+    height: auto;
+    max-height: var(--mobile-palette-max-height);
+    min-height: 140px;
     border-left: none;
     border-top: 1px solid #111827;
     box-shadow: 0 -12px 24px rgba(0, 0, 0, 0.6);
@@ -202,12 +215,12 @@ html, body {
   .palette-items {
     justify-content: flex-start;
     flex-direction: row;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    overflow-y: hidden;
-    align-items: center;
+    flex-wrap: wrap;
+    align-content: flex-start;
+    overflow-x: hidden;
+    overflow-y: auto;
     width: 100%;
-    padding-bottom: 6px;
+    padding: 4px 2px 8px;
     gap: 10px;
     -webkit-overflow-scrolling: touch;
   }

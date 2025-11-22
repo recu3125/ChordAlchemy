@@ -11,6 +11,31 @@ const hoverTooltip = document.createElement("div");
 hoverTooltip.id = "hoverTooltip";
 document.body.appendChild(hoverTooltip);
 
+const mobilePaletteQuery = window.matchMedia("(max-width: 900px), (orientation: portrait)");
+
+function updateMobilePalettePadding() {
+  if (!palette) return;
+  if (!mobilePaletteQuery.matches) {
+    document.documentElement.style.removeProperty("--mobile-palette-padding");
+    return;
+  }
+
+  const paletteRect = palette.getBoundingClientRect();
+  const clampedHeight = Math.min(paletteRect.height || 0, window.innerHeight * 0.3);
+  if (clampedHeight > 0) {
+    document.documentElement.style.setProperty("--mobile-palette-padding", `${clampedHeight}px`);
+  }
+}
+
+mobilePaletteQuery.addEventListener("change", updateMobilePalettePadding);
+window.addEventListener("resize", updateMobilePalettePadding);
+window.addEventListener("orientationchange", updateMobilePalettePadding);
+
+if (typeof ResizeObserver !== "undefined" && palette) {
+  const paletteObserver = new ResizeObserver(updateMobilePalettePadding);
+  paletteObserver.observe(palette);
+}
+
 function getClientPoint(e) {
   if (e.touches && e.touches.length) {
     return { x: e.touches[0].clientX, y: e.touches[0].clientY };
@@ -1527,5 +1552,6 @@ helpOverlay.addEventListener("click", (e) => {
 // Init
 stylePaletteNotes();
 setupPaletteDrag();
+updateMobilePalettePadding();
 // Show help on first load
 showHelp();
