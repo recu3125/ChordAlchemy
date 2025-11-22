@@ -7,12 +7,17 @@ const helpButton = document.getElementById("helpButton");
 const helpOverlay = document.getElementById("helpOverlay");
 const helpCloseButton = document.getElementById("helpCloseButton");
 const speedSlider = document.getElementById("speedSlider");
+const hoverTooltip = document.createElement("div");
+hoverTooltip.id = "hoverTooltip";
+document.body.appendChild(hoverTooltip);
 
 let items = [];
 let selectedItems = new Set();
 
 let clipboardData = null;
 let undoStack = [];
+let hoverTimer = null;
+let hoverTarget = null;
 
 const baseColors = {
   C: "#f97373",
@@ -252,6 +257,13 @@ function updateNoteLabel(el) {
   el.textContent = base;
 }
 
+function formatNoteForDisplay(note) {
+  const parsed = parseNoteName(note);
+  if (!parsed) return note;
+  const acc = parsed.accidental === "#" ? "♯" : parsed.accidental === "b" ? "♭" : "";
+  return `${parsed.step}${acc}${parsed.octave}`;
+}
+
 function applyOctaveRing(el, octave) {
   if (octave == null || isNaN(octave)) {
     el.style.outline = "";
@@ -291,6 +303,46 @@ function applyChordVisual(el, rootNote) {
   }
 }
 
+function hideHoverTooltip() {
+  hoverTooltip.classList.remove("visible");
+}
+
+function showHoverTooltip(el) {
+  if (!el || el.dataset.type !== "chord") return;
+  const notes = (el.dataset.notes || "").split(",").filter(Boolean);
+  if (!notes.length) return;
+
+  const noteText = notes.map(formatNoteForDisplay).join(", ");
+  hoverTooltip.textContent = noteText;
+  hoverTooltip.classList.add("visible");
+
+  const rect = el.getBoundingClientRect();
+  const tipRect = hoverTooltip.getBoundingClientRect();
+  let top = rect.top + window.scrollY - tipRect.height - 8;
+  if (top < 4) top = rect.bottom + window.scrollY + 8;
+
+  const rawLeft = rect.left + window.scrollX + rect.width / 2 - tipRect.width / 2;
+  const viewportRight = window.scrollX + document.documentElement.clientWidth;
+  const clampedLeft = Math.min(viewportRight - tipRect.width - 8, Math.max(window.scrollX + 8, rawLeft));
+  hoverTooltip.style.top = `${top}px`;
+  hoverTooltip.style.left = `${clampedLeft}px`;
+}
+
+function scheduleHoverTooltip(el) {
+  clearTimeout(hoverTimer);
+  hoverTarget = el;
+  hoverTimer = setTimeout(() => {
+    if (hoverTarget === el) showHoverTooltip(el);
+  }, 500);
+}
+
+function cancelHoverTooltip() {
+  clearTimeout(hoverTimer);
+  hoverTimer = null;
+  hoverTarget = null;
+  hideHoverTooltip();
+}
+
 function positionItem(el, x, y) {
   const w = el.offsetWidth || 50;
   const h = el.offsetHeight || 50;
@@ -308,6 +360,8 @@ function registerItem(el) {
   items.push(el);
   el.addEventListener("mousedown", onItemMouseDown);
   el.addEventListener("dblclick", onItemDoubleClick);
+  el.addEventListener("mouseenter", onItemHoverStart);
+  el.addEventListener("mouseleave", onItemHoverEnd);
 }
 
 function removeItem(el) {
@@ -820,6 +874,8 @@ function onItemMouseDown(e) {
   e.stopPropagation();
   const el = e.currentTarget;
 
+  cancelHoverTooltip();
+
   if (!selectedItems.has(el)) {
     selectedItems.clear();
     selectedItems.add(el);
@@ -844,6 +900,16 @@ function onItemMouseDown(e) {
 
   document.addEventListener("mousemove", onDragMouseMove);
   document.addEventListener("mouseup", onDragMouseUp);
+}
+
+function onItemHoverStart(e) {
+  const el = e.currentTarget;
+  if (el.dataset.type !== "chord") return;
+  scheduleHoverTooltip(el);
+}
+
+function onItemHoverEnd() {
+  cancelHoverTooltip();
 }
 
 function onDragMouseMove(e) {
