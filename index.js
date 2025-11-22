@@ -520,7 +520,7 @@ function getChordNameForNotes(notes) {
     if (!intervalSet.has(0)) intervalSet.add(0);
     const intervalsArr = Array.from(intervalSet).sort((a, b) => a - b);
 
-    const extIntervals = [2, 5, 9];
+    const extIntervals = [1, 2, 3, 5, 6, 8, 9];
 
     chordTemplates.forEach((tpl) => {
       const tplIntervals = tpl.intervals;
@@ -546,10 +546,10 @@ function getChordNameForNotes(notes) {
       const hasMinorThird = intervalSet.has(3);
       const hasMajorThird = intervalSet.has(4);
       if (tpl.intervals.includes(3) && hasMajorThird && !tpl.intervals.includes(4)) {
-        thirdMismatchPenalty -= 3.2;
+        thirdMismatchPenalty -= hasMinorThird ? 0.8 : 3.2;
       }
       if (tpl.intervals.includes(4) && hasMinorThird && !tpl.intervals.includes(3)) {
-        thirdMismatchPenalty -= 3.2;
+        thirdMismatchPenalty -= hasMajorThird ? 0.8 : 3.2;
       }
 
       let tensionPenalty = 0;
@@ -607,8 +607,12 @@ function getChordNameForNotes(notes) {
   const hasMaj7 = has(11);
   const hasSeventh = hasDom7 || hasMaj7;
   const has9thInterval = has(2);
+  const hasFlat9Interval = has(1);
+  const hasSharp9Interval = has(3) && intervalSet.has(4);
   const has11thInterval = has(5);
+  const hasSharp11Interval = has(6);
   const has13thInterval = has(9);
+  const hasFlat13Interval = has(8);
 
   let used9ForName = false;
   let used11ForName = false;
@@ -693,6 +697,14 @@ function getChordNameForNotes(notes) {
     ext.push("add11");
   if (has13thInterval && !used13ForName && !tpl.intervals.includes(9) && !isBassOnlyExtra(9))
     ext.push("add13");
+  if (hasFlat9Interval && !tpl.intervals.includes(1) && !isBassOnlyExtra(1))
+    ext.push(hasSeventh ? "b9" : "addb9");
+  if (hasSharp9Interval && !tpl.intervals.includes(3) && !isBassOnlyExtra(3))
+    ext.push(hasSeventh ? "#9" : "add#9");
+  if (hasSharp11Interval && !tpl.intervals.includes(6) && !isBassOnlyExtra(6))
+    ext.push(hasSeventh ? "#11" : "add#11");
+  if (hasFlat13Interval && !tpl.intervals.includes(8) && !isBassOnlyExtra(8))
+    ext.push(hasSeventh ? "b13" : "addb13");
   if (ext.length > 0) name += ext.join("");
 
   if (bassNote && bassNote !== rootNote) {
