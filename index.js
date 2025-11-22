@@ -359,21 +359,28 @@ function createOctaveItem(octDir, x, y) {
 }
 
 const chordTemplates = [
-  { id: "maj",   suffix: "",         intervals: [0, 4, 7] },
-  { id: "min",   suffix: "m",        intervals: [0, 3, 7] },
-  { id: "dim",   suffix: "dim",      intervals: [0, 3, 6] },
-  { id: "aug",   suffix: "+",        intervals: [0, 4, 8] },
-  { id: "sus2",  suffix: "sus2",     intervals: [0, 2, 7] },
-  { id: "sus4",  suffix: "sus4",     intervals: [0, 5, 7] },
-  { id: "5",     suffix: "5",        intervals: [0, 7] },
-  { id: "6",     suffix: "6",        intervals: [0, 4, 7, 9] },
-  { id: "m6",    suffix: "m6",       intervals: [0, 3, 7, 9] },
-  { id: "7",     suffix: "7",        intervals: [0, 4, 7, 10] },
-  { id: "maj7",  suffix: "maj7",     intervals: [0, 4, 7, 11] },
-  { id: "m7",    suffix: "m7",       intervals: [0, 3, 7, 10] },
-  { id: "mMaj7", suffix: "m(maj7)",  intervals: [0, 3, 7, 11] },
-  { id: "m7b5",  suffix: "m7b5",     intervals: [0, 3, 6, 10] },
-  { id: "dim7",  suffix: "dim7",     intervals: [0, 3, 6, 9] }
+  { id: "maj",    suffix: "",          intervals: [0, 4, 7],       quality: [4] },
+  { id: "min",    suffix: "m",         intervals: [0, 3, 7],       quality: [3] },
+  { id: "dim",    suffix: "dim",       intervals: [0, 3, 6],       quality: [3, 6] },
+  { id: "aug",    suffix: "+",         intervals: [0, 4, 8],       quality: [4, 8] },
+  { id: "sus2",   suffix: "sus2",      intervals: [0, 2, 7],       quality: [2] },
+  { id: "sus4",   suffix: "sus",       intervals: [0, 5, 7],       quality: [5] },
+  { id: "5",      suffix: "5",         intervals: [0, 7],          quality: [] },
+  { id: "6",      suffix: "6",         intervals: [0, 4, 7, 9],    quality: [4, 9] },
+  { id: "m6",     suffix: "m6",        intervals: [0, 3, 7, 9],    quality: [3, 9] },
+  { id: "6/9",    suffix: "6/9",       intervals: [0, 4, 7, 9, 2], quality: [4, 9, 2] },
+  { id: "m6/9",   suffix: "m6/9",      intervals: [0, 3, 7, 9, 2], quality: [3, 9, 2] },
+  { id: "7",      suffix: "7",         intervals: [0, 4, 7, 10],   quality: [4, 10] },
+  { id: "7b5",    suffix: "7-5",       intervals: [0, 4, 6, 10],   quality: [4, 6, 10] },
+  { id: "7#5",    suffix: "7+5",       intervals: [0, 4, 8, 10],   quality: [4, 8, 10] },
+  { id: "aug7",   suffix: "aug7",      intervals: [0, 4, 8, 11],   quality: [4, 8, 11] },
+  { id: "maj7",   suffix: "maj7",      intervals: [0, 4, 7, 11],   quality: [4, 11] },
+  { id: "m7",     suffix: "m7",        intervals: [0, 3, 7, 10],   quality: [3, 10] },
+  { id: "mMaj7",  suffix: "m(maj7)",   intervals: [0, 3, 7, 11],   quality: [3, 11] },
+  { id: "7sus4",  suffix: "7sus4",     intervals: [0, 5, 7, 10],   quality: [5, 10] },
+  { id: "7sus2",  suffix: "7sus2",     intervals: [0, 2, 7, 10],   quality: [2, 10] },
+  { id: "m7b5",   suffix: "m7b5",      intervals: [0, 3, 6, 10],   quality: [3, 6, 10] },
+  { id: "dim7",   suffix: "dim7",      intervals: [0, 3, 6, 9],    quality: [3, 6, 9] }
 ];
 
 function toDisplayName(note) {
@@ -399,6 +406,10 @@ function getChordNameForNotes(notes) {
     pcMap[n] = pc;
   });
 
+  const sortedByMidi = uniqNotes
+    .slice()
+    .sort((a, b) => (midiMap[a] || 0) - (midiMap[b] || 0));
+
   let best = null;
 
   uniqNotes.forEach((rootNote) => {
@@ -416,15 +427,55 @@ function getChordNameForNotes(notes) {
     if (!intervalSet.has(0)) intervalSet.add(0);
     const intervalsArr = Array.from(intervalSet).sort((a, b) => a - b);
 
+    const extIntervals = [2, 5, 9];
+
     chordTemplates.forEach((tpl) => {
       const tplIntervals = tpl.intervals;
+      const considered = intervalsArr.filter((iv) => {
+        if (tplIntervals.includes(iv)) return true;
+        return !extIntervals.includes(iv);
+      });
+
       const covered = tplIntervals.filter((iv) => intervalSet.has(iv));
       const coverage = covered.length;
-      const missing = tplIntervals.length - coverage;
-      const extra = intervalsArr.filter((iv) => !tplIntervals.includes(iv)).length;
+      const missingIntervals = tplIntervals.filter((iv) => !intervalSet.has(iv));
+      const extra = considered.filter((iv) => !tplIntervals.includes(iv));
+
+      const coverageScore = coverage * (tplIntervals.length >= 5 ? 3.2 : 4);
+      const missingScore = missingIntervals.length * -(tplIntervals.length > intervalsArr.length ? 3.5 : 2.5);
+      const extraScore = extra.reduce((acc, iv) => {
+        if (extIntervals.includes(iv)) return acc - 0.3;
+        if (iv === 10 || iv === 11) return acc - 1.8;
+        return acc - 1.1;
+      }, 0);
+
+      let thirdMismatchPenalty = 0;
+      const hasMinorThird = intervalSet.has(3);
+      const hasMajorThird = intervalSet.has(4);
+      if (tpl.intervals.includes(3) && hasMajorThird && !tpl.intervals.includes(4)) {
+        thirdMismatchPenalty -= 3.2;
+      }
+      if (tpl.intervals.includes(4) && hasMinorThird && !tpl.intervals.includes(3)) {
+        thirdMismatchPenalty -= 3.2;
+      }
+
+      let tensionPenalty = 0;
+      [10, 11].forEach((iv) => {
+        if (intervalSet.has(iv) && !tplIntervals.includes(iv)) tensionPenalty -= 3;
+      });
+
+      const qualityScore = (tpl.quality || []).reduce((acc, iv) => {
+        if (intervalSet.has(iv)) return acc + 1.5;
+        return acc - 1;
+      }, 0);
 
       const score =
-        coverage * 3 - missing * 2 - extra +
+        coverageScore +
+        missingScore +
+        extraScore +
+        thirdMismatchPenalty +
+        tensionPenalty +
+        qualityScore +
         (tplIntervals.length <= intervalsArr.length ? 0.2 : 0) +
         (coverage === tplIntervals.length ? 0.5 : 0);
 
@@ -456,19 +507,104 @@ function getChordNameForNotes(notes) {
 
   const { rootNote, tpl, intervalsArr, intervalSet } = best;
   const rootName = toDisplayName(rootNote);
-  let name = rootName + tpl.suffix;
+  let suffix = tpl.suffix;
+
+  const has = (iv) => intervalSet.has(iv);
+  const hasDom7 = has(10);
+  const hasMaj7 = has(11);
+  const hasSeventh = hasDom7 || hasMaj7;
+  const has9thInterval = has(2);
+  const has11thInterval = has(5);
+  const has13thInterval = has(9);
+
+  let used9ForName = false;
+  let used11ForName = false;
+  let used13ForName = false;
+
+  const extraIntervals = intervalsArr.filter((iv) => !tpl.intervals.includes(iv));
+  const bassNote = sortedByMidi[0];
+  const bassInterval =
+    bassNote != null && pcMap[bassNote] != null
+      ? (pcMap[bassNote] - best.rootPc + 12) % 12
+      : null;
+  const isBassOnlyExtra = (iv) =>
+    bassInterval != null && extraIntervals.length === 1 && extraIntervals[0] === iv && bassInterval === iv;
+
+  const setExtendedSuffix = (newSuffix) => {
+    if (newSuffix && newSuffix !== suffix) {
+      suffix = newSuffix;
+      return true;
+    }
+    return false;
+  };
+
+  if (has13thInterval && hasSeventh && !isBassOnlyExtra(9)) {
+    const applied =
+      (hasMaj7 && setExtendedSuffix("maj13")) ||
+      (tpl.id === "maj7" && setExtendedSuffix("maj13")) ||
+      (tpl.id === "m7" && setExtendedSuffix("m13")) ||
+      (tpl.id === "mMaj7" && setExtendedSuffix("m(maj13)")) ||
+      (tpl.id === "7" && setExtendedSuffix("13"));
+    used13ForName = Boolean(applied);
+  }
+
+  if (!used13ForName && has11thInterval && hasSeventh && !isBassOnlyExtra(5)) {
+    const applied =
+      (hasMaj7 && setExtendedSuffix("maj11")) ||
+      (tpl.id === "maj7" && setExtendedSuffix("maj11")) ||
+      (tpl.id === "m7" && setExtendedSuffix("m11")) ||
+      (tpl.id === "mMaj7" && setExtendedSuffix("m(maj11)")) ||
+      (tpl.id === "7" && setExtendedSuffix("11"));
+    used11ForName = Boolean(applied);
+  }
+
+  if (!used13ForName && !used11ForName && has9thInterval && hasSeventh && !isBassOnlyExtra(2)) {
+    const applied =
+      (hasMaj7 && setExtendedSuffix("maj9")) ||
+      (tpl.id === "maj7" && setExtendedSuffix("maj9")) ||
+      (tpl.id === "m7" && setExtendedSuffix("m9")) ||
+      (tpl.id === "mMaj7" && setExtendedSuffix("m(maj9)")) ||
+      (tpl.id === "7" && setExtendedSuffix("9"));
+    used9ForName = Boolean(applied);
+  }
+
+  let name = rootName + suffix;
 
   const missingInts = tpl.intervals.filter((iv) => !intervalSet.has(iv));
-  let omit5 = false;
-  if (missingInts.includes(7) && intervalsArr.length >= 2) omit5 = true;
-  if (omit5) name += "omit5";
+  let no5 = false;
+  if (missingInts.includes(7) && intervalsArr.length >= 2) no5 = true;
+  if (no5) name += "(no5)";
+
+  const needsThird = tpl.intervals.includes(3) || tpl.intervals.includes(4);
+  const hasThird = intervalSet.has(3) || intervalSet.has(4);
+  if (needsThird && !hasThird) name += "(no3)";
 
   const ext = [];
-  const has = (iv) => intervalSet.has(iv);
-  if (has(2) && !tpl.intervals.includes(2)) ext.push("add9");
-  if (has(5) && !tpl.intervals.includes(5) && tpl.id !== "sus4") ext.push("add11");
-  if (has(9) && !tpl.intervals.includes(9)) ext.push("add13");
+  if (
+    has9thInterval &&
+    !used9ForName &&
+    !used11ForName &&
+    !used13ForName &&
+    !tpl.intervals.includes(2) &&
+    !isBassOnlyExtra(2)
+  )
+    ext.push("add9");
+  if (
+    has11thInterval &&
+    !used11ForName &&
+    !used13ForName &&
+    !tpl.intervals.includes(5) &&
+    tpl.id !== "sus4" &&
+    !isBassOnlyExtra(5)
+  )
+    ext.push("add11");
+  if (has13thInterval && !used13ForName && !tpl.intervals.includes(9) && !isBassOnlyExtra(9))
+    ext.push("add13");
   if (ext.length > 0) name += ext.join("");
+
+  if (bassNote && bassNote !== rootNote) {
+    name += "/" + toDisplayName(bassNote);
+  }
 
   return { name, root: rootNote };
 }
