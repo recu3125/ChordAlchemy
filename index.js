@@ -1103,6 +1103,8 @@ function applyOctaveToPitchItem(target, octDir) {
 function tryCombineItem(anchorEl) {
   if (!anchorEl) return;
 
+  const currentScaleInfo = identifyScaleFromNotes(getNoteItems());
+
   for (const other of items) {
     if (other === anchorEl) continue;
     if (!elementsOverlapForCombine(anchorEl, other)) continue;
@@ -1150,6 +1152,13 @@ function tryCombineItem(anchorEl) {
         (typeA === "octave" && typeB === "accidental")) {
       continue;
     }
+
+    const hasProtectedScaleNote = !!(
+      currentScaleInfo &&
+      ((typeA === "note" && currentScaleInfo.notes.includes(anchorEl.dataset.note)) ||
+        (typeB === "note" && currentScaleInfo.notes.includes(other.dataset.note)))
+    );
+    if (hasProtectedScaleNote) continue;
 
     // Normal note/chord combination → chord
     const notesA = extractNotesFromItem(anchorEl);
