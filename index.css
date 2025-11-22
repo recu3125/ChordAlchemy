@@ -20,10 +20,39 @@ body {
   padding: 8px 12px;
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
   border-bottom: 1px solid #1f2937;
   background: #020617;
   font-size: 12px;
+}
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.toolbar-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #9ca3af;
+  font-weight: 600;
+}
+.toolbar-links a {
+  color: inherit;
+  text-decoration: none;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.toolbar-links a:hover {
+  color: #f9fafb;
+  border-color: #334155;
+  background: rgba(255, 255, 255, 0.04);
+}
+.link-separator {
+  color: #475569;
 }
 #playButton {
   padding: 6px 14px;

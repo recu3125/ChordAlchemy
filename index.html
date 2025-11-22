@@ -8,12 +8,19 @@
 <body>
   <div id="app">
     <div id="toolbar">
-      <button id="playButton">▶ Play</button>
-      <button id="helpButton">Help</button>
-      <label id="speedLabel">
-        <span>Speed</span>
-        <input id="speedSlider" type="range" min="60" max="600" value="220" />
-      </label>
+      <div class="toolbar-left">
+        <button id="playButton">▶ Play</button>
+        <button id="helpButton">Help</button>
+        <label id="speedLabel">
+          <span>Speed</span>
+          <input id="speedSlider" type="range" min="60" max="600" value="220" />
+        </label>
+      </div>
+      <div class="toolbar-links">
+        <a href="https://recu3125.com" target="_blank" rel="noreferrer noopener">made by recu3125</a>
+        <span class="link-separator">•</span>
+        <a href="https://github.com/recu3125/chordalchemy" target="_blank" rel="noreferrer noopener">GitHub</a>
+      </div>
     </div>
     <div id="container">
       <div id="playArea">
