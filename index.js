@@ -562,6 +562,8 @@ function getChordNameForNotes(notes) {
         return acc - 1;
       }, 0);
 
+      const bassBonus = rootNote === sortedByMidi[0] ? 1 : 0;
+
       const score =
         coverageScore +
         missingScore +
@@ -569,6 +571,7 @@ function getChordNameForNotes(notes) {
         thirdMismatchPenalty +
         tensionPenalty +
         qualityScore +
+        bassBonus +
         (tplIntervals.length <= intervalsArr.length ? 0.2 : 0) +
         (coverage === tplIntervals.length ? 0.5 : 0);
 
