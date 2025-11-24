@@ -92,9 +92,9 @@ speedSlider.addEventListener("input", () => {
 });
 
 // Piano-like sound
-function playPiano(freq, duration = 0.8, overallGain = 0.35) {
+function playPiano(freq, duration = 0.8, overallGain = 0.35, startAt = null) {
   const ctx = getAudioCtx();
-  const now = ctx.currentTime;
+  const now = startAt ?? ctx.currentTime;
 
   const masterGain = ctx.createGain();
   masterGain.gain.setValueAtTime(0, now);
@@ -401,6 +401,7 @@ function registerItem(el) {
   el.addEventListener("dblclick", onItemDoubleClick);
   el.addEventListener("mouseenter", onItemHoverStart);
   el.addEventListener("mouseleave", onItemHoverEnd);
+  el.addEventListener("contextmenu", onItemContextMenu);
 }
 
 function removeItem(el) {
@@ -768,6 +769,43 @@ function playElement(el) {
   }
 }
 
+function playArpeggioNotes(notes, step = 0.12) {
+  const ctx = getAudioCtx();
+  const start = ctx.currentTime;
+  notes.forEach((note, idx) => {
+    const freq = noteToFreq(note);
+    if (freq) {
+      playPiano(freq, 0.7, 0.32, start + idx * step);
+    }
+  });
+}
+
+function splitChordIntoNotes(chordEl) {
+  const notes = (chordEl.dataset.notes || "").split(",").filter(Boolean);
+  if (!notes.length) return;
+
+  const chordRect = chordEl.getBoundingClientRect();
+  const areaRect = playArea.getBoundingClientRect();
+  const centerX = chordRect.left + chordRect.width / 2 - areaRect.left;
+  const centerY = chordRect.top + chordRect.height / 2 - areaRect.top;
+  const spacing = 56;
+  const offsetCount = notes.length - 1;
+  const startOffset = -(offsetCount / 2) * spacing;
+
+  const removedData = serializeItem(chordEl);
+  const created = notes.map((note, idx) => {
+    const x = centerX - 25 + startOffset + idx * spacing;
+    const y = centerY - 25;
+    return createNoteItem(note, x, y);
+  });
+
+  removeItem(chordEl);
+  selectedItems = new Set(created);
+  updateSelectionStyles();
+  pushUndo({ type: "split", created, removed: [removedData] });
+  playArpeggioNotes(notes);
+}
+
 // ---- Undo / Copy helpers ----
 function serializeItem(el) {
   const type = el.dataset.type;
@@ -833,6 +871,13 @@ function undoLast() {
     selectedItems = new Set(restored);
     updateSelectionStyles();
   } else if (action.type === "combine") {
+    action.created.forEach((el) => {
+      if (items.includes(el)) removeItem(el);
+    });
+    const restored = action.removed.map((d) => restoreItem(d));
+    selectedItems = new Set(restored);
+    updateSelectionStyles();
+  } else if (action.type === "split") {
     action.created.forEach((el) => {
       if (items.includes(el)) removeItem(el);
     });
@@ -942,6 +987,12 @@ function removeDragListeners() {
 function onItemPointerDown(e) {
   const point = getClientPoint(e);
   if (!point) return;
+  if (e.type === "mousedown" && e.button === 2) {
+    selectedItems.clear();
+    selectedItems.add(e.currentTarget);
+    updateSelectionStyles();
+    return;
+  }
   e.preventDefault();
   e.stopPropagation();
   const el = e.currentTarget;
@@ -971,6 +1022,18 @@ function onItemPointerDown(e) {
   };
 
   addDragListeners();
+}
+
+function onItemContextMenu(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  const el = e.currentTarget;
+  if (el.dataset.type === "chord") {
+    selectedItems.clear();
+    selectedItems.add(el);
+    updateSelectionStyles();
+    splitChordIntoNotes(el);
+  }
 }
 
 function onItemHoverStart(e) {
