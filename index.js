@@ -457,7 +457,7 @@ const chordTemplates = [
   { id: "dim",    suffix: "dim",       intervals: [0, 3, 6],       quality: [3, 6] },
   { id: "aug",    suffix: "+",         intervals: [0, 4, 8],       quality: [4, 8] },
   { id: "sus2",   suffix: "sus2",      intervals: [0, 2, 7],       quality: [2] },
-  { id: "sus4",   suffix: "sus",       intervals: [0, 5, 7],       quality: [5] },
+  { id: "sus4",   suffix: "sus4",      intervals: [0, 5, 7],       quality: [5] },
   { id: "5",      suffix: "5",         intervals: [0, 7],          quality: [] },
   { id: "6",      suffix: "6",         intervals: [0, 4, 7, 9],    quality: [4, 9] },
   { id: "m6",     suffix: "m6",        intervals: [0, 3, 7, 9],    quality: [3, 9] },
