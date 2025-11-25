@@ -124,6 +124,27 @@ html, body {
   overflow: hidden;
 }
 
+#connectionLayer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: visible;
+  z-index: 8;
+}
+
+#connectionLayer line {
+  stroke: #fde047;
+  stroke-width: 2.2px;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 6px rgba(253, 224, 71, 0.35));
+}
+
+#connectionLayer line.draft {
+  stroke: #93c5fd;
+  stroke-dasharray: 6 6;
+  filter: drop-shadow(0 0 4px rgba(147, 197, 253, 0.4));
+}
+
 #palette {
   position: absolute;
   top: 0;

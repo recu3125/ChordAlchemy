@@ -1,4 +1,5 @@
 const playArea = document.getElementById("playArea");
+const connectionLayer = document.getElementById("connectionLayer");
 const palette = document.getElementById("palette");
 const playButton = document.getElementById("playButton");
 const playHead = document.getElementById("playHead");
@@ -52,6 +53,17 @@ function getClientPoint(e) {
 let items = [];
 let selectedItems = new Set();
 
+let itemIdCounter = 1;
+let connections = [];
+let connectionLookup = new Map();
+let connectionPlayState = new Map();
+let connectionDraft = null;
+let connectionIdCounter = 1;
+let connectionGesture = null;
+let suppressContextMenu = false;
+let suppressContextMenuTimer = null;
+let longPressState = null;
+
 let clipboardData = null;
 let undoStack = [];
 let hoverTimer = null;
@@ -92,9 +104,9 @@ speedSlider.addEventListener("input", () => {
 });
 
 // Piano-like sound
-function playPiano(freq, duration = 0.8, overallGain = 0.35) {
+function playPiano(freq, duration = 0.8, overallGain = 0.35, startAt = null) {
   const ctx = getAudioCtx();
-  const now = ctx.currentTime;
+  const now = startAt ?? ctx.currentTime;
 
   const masterGain = ctx.createGain();
   masterGain.gain.setValueAtTime(0, now);
@@ -141,6 +153,62 @@ function playPiano(freq, duration = 0.8, overallGain = 0.35) {
   osc1.stop(now + duration + 0.05);
   osc2.stop(now + duration + 0.05);
   osc3.stop(now + duration + 0.05);
+}
+
+const CONNECTED_GAIN_SCALE = 0.4;
+
+function startSustainedPiano(freq, overallGain = 0.32) {
+  const ctx = getAudioCtx();
+  const now = ctx.currentTime;
+
+  const masterGain = ctx.createGain();
+  masterGain.gain.setValueAtTime(0, now);
+  masterGain.gain.linearRampToValueAtTime(overallGain, now + 0.02);
+  masterGain.connect(ctx.destination);
+
+  const osc1 = ctx.createOscillator();
+  osc1.type = "sine";
+  osc1.frequency.value = freq;
+
+  const osc2 = ctx.createOscillator();
+  osc2.type = "triangle";
+  osc2.frequency.value = freq * 2;
+
+  const osc3 = ctx.createOscillator();
+  osc3.type = "sine";
+  osc3.frequency.value = freq * 3;
+
+  const g1 = ctx.createGain();
+  const g2 = ctx.createGain();
+  const g3 = ctx.createGain();
+
+  g1.gain.setValueAtTime(1.0, now);
+  g2.gain.setValueAtTime(0.4, now);
+  g3.gain.setValueAtTime(0.25, now);
+
+  osc1.connect(g1);
+  osc2.connect(g2);
+  osc3.connect(g3);
+
+  g1.connect(masterGain);
+  g2.connect(masterGain);
+  g3.connect(masterGain);
+
+  osc1.start(now);
+  osc2.start(now);
+  osc3.start(now);
+
+  const stop = (releaseTime = 0.25) => {
+    const t = ctx.currentTime;
+    masterGain.gain.cancelScheduledValues(t);
+    masterGain.gain.setValueAtTime(masterGain.gain.value, t);
+    masterGain.gain.exponentialRampToValueAtTime(0.0001, t + releaseTime);
+    osc1.stop(t + releaseTime + 0.02);
+    osc2.stop(t + releaseTime + 0.02);
+    osc3.stop(t + releaseTime + 0.02);
+  };
+
+  return { stop };
 }
 
 // Kick (sharp)
@@ -401,6 +469,22 @@ function registerItem(el) {
   el.addEventListener("dblclick", onItemDoubleClick);
   el.addEventListener("mouseenter", onItemHoverStart);
   el.addEventListener("mouseleave", onItemHoverEnd);
+  el.addEventListener("contextmenu", onItemContextMenu);
+}
+
+function ensureItemId(el) {
+  if (!el.dataset.itemId) {
+    el.dataset.itemId = `itm-${itemIdCounter++}`;
+  }
+}
+
+function getItemCenter(el) {
+  const rect = el.getBoundingClientRect();
+  const areaRect = playArea.getBoundingClientRect();
+  return {
+    x: rect.left + rect.width / 2 - areaRect.left,
+    y: rect.top + rect.height / 2 - areaRect.top
+  };
 }
 
 function removeItem(el) {
@@ -412,6 +496,16 @@ function removeItem(el) {
   } else if (el.parentNode) {
     el.parentNode.removeChild(el);
   }
+  cleanConnections();
+  renderConnections();
+}
+
+function getDisplayFlavorFromNote(noteName) {
+  const parsed = parseNoteName(noteName);
+  if (!parsed) return "none";
+  if (parsed.accidental === "#") return "sharp";
+  if (parsed.accidental === "b") return "flat";
+  return "none";
 }
 
 function createNoteItem(noteName, x, y) {
@@ -419,7 +513,8 @@ function createNoteItem(noteName, x, y) {
   el.className = "item note";
   el.dataset.type = "note";
   el.dataset.note = noteName;
-  el.dataset.displayAcc = "none";
+  el.dataset.displayAcc = getDisplayFlavorFromNote(noteName);
+  ensureItemId(el);
   playArea.appendChild(el);
   positionItem(el, x, y);
   applyNoteVisual(el);
@@ -433,6 +528,7 @@ function createAccidentalItem(accType, x, y) {
   el.dataset.type = "accidental";
   el.dataset.accType = accType;
   el.textContent = accType === "sharp" ? "♯" : "♭";
+  ensureItemId(el);
   playArea.appendChild(el);
   positionItem(el, x, y);
   registerItem(el);
@@ -445,6 +541,7 @@ function createOctaveItem(octDir, x, y) {
   el.dataset.type = "octave";
   el.dataset.octDir = octDir;
   el.textContent = octDir === "up" ? "8↑" : "8↓";
+  ensureItemId(el);
   playArea.appendChild(el);
   positionItem(el, x, y);
   registerItem(el);
@@ -726,6 +823,7 @@ function createChordItem(notes, x, y) {
   el.className = "item chord";
   el.dataset.type = "chord";
   el.dataset.notes = uniqSortedNotes.join(",");
+  ensureItemId(el);
 
   const chordInfo = getChordNameForNotes(uniqSortedNotes);
   el.dataset.chordName = chordInfo.name;
@@ -765,6 +863,296 @@ function playElement(el) {
   } else if (type === "octave") {
     if (el.dataset.octDir === "up") playHiHat();
     else playTom();
+  }
+}
+
+function playArpeggioNotes(notes, step = 0.12) {
+  const ctx = getAudioCtx();
+  const start = ctx.currentTime;
+  notes.forEach((note, idx) => {
+    const freq = noteToFreq(note);
+    if (freq) {
+      playPiano(freq, 0.7, 0.32, start + idx * step);
+    }
+  });
+}
+
+function splitChordIntoNotes(chordEl) {
+  const notes = (chordEl.dataset.notes || "").split(",").filter(Boolean);
+  if (!notes.length) return;
+
+  const chordRect = chordEl.getBoundingClientRect();
+  const areaRect = playArea.getBoundingClientRect();
+  const centerX = chordRect.left + chordRect.width / 2 - areaRect.left;
+  const centerY = chordRect.top + chordRect.height / 2 - areaRect.top;
+  const spacing = 56;
+  const offsetCount = notes.length - 1;
+  const startOffset = -(offsetCount / 2) * spacing;
+
+  const removedData = serializeItem(chordEl);
+  const created = notes.map((note, idx) => {
+    const x = centerX - 25 + startOffset + idx * spacing;
+    const y = centerY - 25;
+    return createNoteItem(note, x, y);
+  });
+
+  removeItem(chordEl);
+  selectedItems = new Set(created);
+  updateSelectionStyles();
+  pushUndo({ type: "split", created, removed: [removedData] });
+  playArpeggioNotes(notes);
+}
+
+function itemsAreEquivalent(a, b) {
+  if (!a || !b) return false;
+  if (a.dataset.type !== b.dataset.type) return false;
+
+  if (a.dataset.type === "note") {
+    return a.dataset.note === b.dataset.note;
+  }
+
+  if (a.dataset.type === "chord") {
+    const normalize = (el) =>
+      (el.dataset.notes || "")
+        .split(",")
+        .filter(Boolean)
+        .map((n) => n.trim())
+        .sort()
+        .join(",");
+    return normalize(a) === normalize(b);
+  }
+
+  return false;
+}
+
+function getItemSignature(el) {
+  if (el.dataset.type === "note") {
+    return `note:${el.dataset.note || ""}`;
+  }
+
+  if (el.dataset.type === "chord") {
+    const normalized = (el.dataset.notes || "")
+      .split(",")
+      .filter(Boolean)
+      .map((n) => n.trim())
+      .sort()
+      .join(",");
+    return `chord:${normalized}`;
+  }
+
+  return null;
+}
+
+function cleanConnections() {
+  const existingIds = new Set(items.map((el) => el.dataset.itemId));
+  const updated = [];
+
+  connections.forEach((conn) => {
+    const validNodes = [...conn.nodeIds]
+      .map((id) => ({ id, el: items.find((item) => item.dataset.itemId === id) }))
+      .filter(({ id, el }) => id && el && existingIds.has(id));
+
+    const groups = new Map();
+    validNodes.forEach(({ id, el }) => {
+      const sig = getItemSignature(el);
+      if (!sig) return;
+      if (!groups.has(sig)) groups.set(sig, []);
+      groups.get(sig).push(id);
+    });
+
+    const grouped = [...groups.values()].filter((ids) => ids.length >= 2);
+    grouped.forEach((ids, idx) => {
+      updated.push({ id: idx === 0 ? conn.id : `conn-${connectionIdCounter++}`, nodeIds: new Set(ids) });
+    });
+  });
+
+  connections = updated;
+
+  const validConnIds = new Set(connections.map((c) => c.id));
+  connectionPlayState = new Map(
+    [...connectionPlayState.entries()].filter(([id]) => validConnIds.has(id))
+  );
+}
+
+function getSortedConnectionElements(conn) {
+  return [...conn.nodeIds]
+    .map((id) => items.find((el) => el.dataset.itemId === id))
+    .filter(Boolean)
+    .sort((a, b) => getItemCenter(a).x - getItemCenter(b).x);
+}
+
+function getRightmostMember(memberSet) {
+  const members = Array.from(memberSet);
+  if (!members.length) return null;
+  return members.reduce((rightmost, el) => {
+    if (!rightmost) return el;
+    return getItemCenter(el).x > getItemCenter(rightmost).x ? el : rightmost;
+  }, null);
+}
+
+function renderConnections() {
+  if (!connectionLayer) return;
+  cleanConnections();
+  connectionLookup = new Map();
+
+  while (connectionLayer.firstChild) connectionLayer.removeChild(connectionLayer.firstChild);
+
+  connections.forEach((conn) => {
+    const sorted = getSortedConnectionElements(conn);
+
+    sorted.forEach((el, idx) => {
+      connectionLookup.set(el.dataset.itemId, { connId: conn.id, index: idx });
+    });
+
+    for (let i = 0; i < sorted.length - 1; i++) {
+      const a = getItemCenter(sorted[i]);
+      const b = getItemCenter(sorted[i + 1]);
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", a.x);
+      line.setAttribute("y1", a.y);
+      line.setAttribute("x2", b.x);
+      line.setAttribute("y2", b.y);
+      connectionLayer.appendChild(line);
+    }
+  });
+}
+
+function stopConnectionVoices() {
+  connectionPlayState.forEach((state) => {
+    if (state.activeVoices) {
+      state.activeVoices.forEach((v) => v.stop(0.1));
+    }
+  });
+  connectionPlayState = new Map();
+}
+
+function handleConnectionTrigger(connId, index, el) {
+  const conn = connections.find((c) => c.id === connId);
+  if (!conn) return;
+  const notes = extractNotesFromItem(el);
+  if (!notes.length) return;
+
+  let state = connectionPlayState.get(connId);
+  if (!state) {
+    state = { activeVoices: [], lastIndex: -1 };
+    connectionPlayState.set(connId, state);
+  }
+
+  if (state.activeVoices && state.activeVoices.length) {
+    state.activeVoices.forEach((v) => v.stop(0.15));
+  }
+
+  const isTerminalNode = index === conn.nodeIds.size - 1;
+
+  if (isTerminalNode) {
+    state.activeVoices = [];
+    state.lastIndex = index;
+    return;
+  }
+
+  const voices = notes
+    .map((n) => {
+      const f = noteToFreq(n);
+      if (!f) return null;
+      return startSustainedPiano(f, 0.3 * CONNECTED_GAIN_SCALE);
+    })
+    .filter(Boolean);
+
+  state.activeVoices = voices;
+  state.lastIndex = index;
+}
+
+function updateDraftLine(fromEl, point) {
+  if (!connectionLayer) return;
+  if (!connectionDraft) {
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.classList.add("draft");
+    connectionLayer.appendChild(line);
+    connectionDraft = line;
+  }
+
+  const a = getItemCenter(fromEl);
+  connectionDraft.setAttribute("x1", a.x);
+  connectionDraft.setAttribute("y1", a.y);
+  connectionDraft.setAttribute("x2", point.x - playArea.getBoundingClientRect().left);
+  connectionDraft.setAttribute("y2", point.y - playArea.getBoundingClientRect().top);
+}
+
+function clearDraftLine() {
+  if (connectionDraft && connectionDraft.parentNode) {
+    connectionDraft.parentNode.removeChild(connectionDraft);
+  }
+  connectionDraft = null;
+}
+
+function finalizeConnectionChain(chainEls) {
+  const uniqueIds = new Set(chainEls.map((el) => el.dataset.itemId));
+  if (uniqueIds.size < 2) return;
+
+  const baseEl = chainEls[0];
+  let mergedIds = new Set(uniqueIds);
+  let mergedId = null;
+  const remaining = [];
+
+  connections.forEach((conn) => {
+    const connEls = [...conn.nodeIds]
+      .map((id) => items.find((el) => el.dataset.itemId === id))
+      .filter(Boolean);
+    if (!connEls.length) return;
+    const compatible = connEls.every((el) => itemsAreEquivalent(baseEl, el));
+    const overlaps = [...conn.nodeIds].some((id) => mergedIds.has(id));
+
+    if (compatible && overlaps) {
+      mergedId = mergedId || conn.id;
+      conn.nodeIds.forEach((id) => mergedIds.add(id));
+    } else {
+      remaining.push(conn);
+    }
+  });
+
+  connections = remaining;
+  connections.push({ id: mergedId || `conn-${connectionIdCounter++}`, nodeIds: mergedIds });
+
+  renderConnections();
+}
+
+function startConnectionGesture(el, point, { suppressContext = false, trigger = "mouse" } = {}) {
+  if (suppressContext) {
+    suppressContextMenu = true;
+    if (suppressContextMenuTimer) clearTimeout(suppressContextMenuTimer);
+    suppressContextMenuTimer = null;
+  }
+
+  connectionGesture = {
+    members: new Set([el]),
+    anchor: el,
+    baseEl: el,
+    startPoint: point,
+    moved: false,
+    trigger
+  };
+  updateDraftLine(el, point);
+}
+
+function advanceConnectionGesture(targetEl) {
+  if (!connectionGesture) return;
+  if (connectionGesture.members.has(targetEl)) return;
+  if (!itemsAreEquivalent(connectionGesture.baseEl, targetEl)) return;
+  connectionGesture.moved = true;
+  connectionGesture.members.add(targetEl);
+  connectionGesture.anchor = getRightmostMember(connectionGesture.members);
+  finalizeConnectionChain(Array.from(connectionGesture.members));
+}
+
+function endConnectionGesture() {
+  clearDraftLine();
+  connectionGesture = null;
+  if (suppressContextMenu) {
+    if (suppressContextMenuTimer) clearTimeout(suppressContextMenuTimer);
+    suppressContextMenuTimer = setTimeout(() => {
+      suppressContextMenu = false;
+      suppressContextMenuTimer = null;
+    }, 120);
   }
 }
 
@@ -839,6 +1227,13 @@ function undoLast() {
     const restored = action.removed.map((d) => restoreItem(d));
     selectedItems = new Set(restored);
     updateSelectionStyles();
+  } else if (action.type === "split") {
+    action.created.forEach((el) => {
+      if (items.includes(el)) removeItem(el);
+    });
+    const restored = action.removed.map((d) => restoreItem(d));
+    selectedItems = new Set(restored);
+    updateSelectionStyles();
   }
 }
 
@@ -907,6 +1302,8 @@ function handleItemWheel(item, deltaY) {
     applyChordVisual(item, rootForColor);
     playElement(item);
   }
+
+  renderConnections();
 }
 
 playArea.addEventListener(
@@ -939,12 +1336,43 @@ function removeDragListeners() {
   document.removeEventListener("touchcancel", onDragPointerUp);
 }
 
+function addConnectionListeners() {
+  document.addEventListener("mousemove", onConnectionPointerMove);
+  document.addEventListener("mouseup", onConnectionPointerUp);
+  document.addEventListener("touchmove", onConnectionPointerMove, { passive: false });
+  document.addEventListener("touchend", onConnectionPointerUp);
+  document.addEventListener("touchcancel", onConnectionPointerUp);
+}
+
+function removeConnectionListeners() {
+  document.removeEventListener("mousemove", onConnectionPointerMove);
+  document.removeEventListener("mouseup", onConnectionPointerUp);
+  document.removeEventListener("touchmove", onConnectionPointerMove);
+  document.removeEventListener("touchend", onConnectionPointerUp);
+  document.removeEventListener("touchcancel", onConnectionPointerUp);
+}
+
 function onItemPointerDown(e) {
   const point = getClientPoint(e);
   if (!point) return;
+
+  const el = e.currentTarget;
+  const isRightClick = e.type === "mousedown" && e.button === 2;
+  const isTouch = e.type === "touchstart";
+
+  if (isRightClick && (el.dataset.type === "note" || el.dataset.type === "chord")) {
+    e.preventDefault();
+    e.stopPropagation();
+    selectedItems.clear();
+    selectedItems.add(el);
+    updateSelectionStyles();
+    startConnectionGesture(el, point, { suppressContext: true, trigger: "mouse" });
+    addConnectionListeners();
+    return;
+  }
+
   e.preventDefault();
   e.stopPropagation();
-  const el = e.currentTarget;
 
   cancelHoverTooltip();
 
@@ -963,6 +1391,7 @@ function onItemPointerDown(e) {
   dragState = {
     startX,
     startY,
+    moved: false,
     items: dragItems.map((item) => ({
       el: item,
       left: parseFloat(item.style.left) || 0,
@@ -970,7 +1399,35 @@ function onItemPointerDown(e) {
     }))
   };
 
+  if (isTouch) {
+    longPressState = {
+      el,
+      startX: point.x,
+      startY: point.y,
+      longPressed: false,
+      forSplit: el.dataset.type === "chord",
+      timer: setTimeout(() => {
+        if (!longPressState || longPressState.el !== el) return;
+        longPressState.longPressed = true;
+        if (navigator.vibrate) navigator.vibrate(10);
+      }, 480)
+    };
+  }
+
   addDragListeners();
+}
+
+function onItemContextMenu(e) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (suppressContextMenu || connectionGesture) return;
+  const el = e.currentTarget;
+  if (el.dataset.type === "chord") {
+    selectedItems.clear();
+    selectedItems.add(el);
+    updateSelectionStyles();
+    splitChordIntoNotes(el);
+  }
 }
 
 function onItemHoverStart(e) {
@@ -988,8 +1445,30 @@ function onDragPointerMove(e) {
   const point = getClientPoint(e);
   if (!point) return;
   if (e.cancelable) e.preventDefault();
+  if (longPressState) {
+    const dist = Math.hypot(point.x - longPressState.startX, point.y - longPressState.startY);
+    if (dist > 6 && longPressState.timer) {
+      clearTimeout(longPressState.timer);
+      longPressState.timer = null;
+    }
+
+    if (longPressState.longPressed && !connectionGesture && e.type.startsWith("touch")) {
+      startConnectionGesture(longPressState.el, point, { trigger: "touch" });
+      dragState = null;
+      removeDragListeners();
+      addConnectionListeners();
+      longPressState = null;
+      return;
+    }
+  }
+
+  if (connectionGesture) {
+    updateDraftLine(connectionGesture.anchor, point);
+    return;
+  }
   const dx = point.x - dragState.startX;
   const dy = point.y - dragState.startY;
+  if (Math.abs(dx) > 2 || Math.abs(dy) > 2) dragState.moved = true;
 
   dragState.items.forEach((it) => {
     let newLeft = it.left + dx;
@@ -1003,6 +1482,8 @@ function onDragPointerMove(e) {
     it.el.style.left = newLeft + "px";
     it.el.style.top = newTop + "px";
   });
+
+  renderConnections();
 }
 
 function elementsOverlapForCombine(a, b) {
@@ -1045,6 +1526,8 @@ function applyAccidentalToPitchItem(target, accType) {
     const rootForColor = chordInfo.root || newNotes[0];
     applyChordVisual(target, rootForColor);
   }
+
+  renderConnections();
 }
 
 function applyOctaveToPitchItem(target, octDir) {
@@ -1065,6 +1548,8 @@ function applyOctaveToPitchItem(target, octDir) {
     const rootForColor = chordInfo.root || newNotes[0];
     applyChordVisual(target, rootForColor);
   }
+
+  renderConnections();
 }
 
 function tryCombineItem(anchorEl) {
@@ -1149,6 +1634,18 @@ function tryCombineItem(anchorEl) {
 function onDragPointerUp(e) {
   if (!dragState) return;
   removeDragListeners();
+  if (longPressState && longPressState.timer) {
+    clearTimeout(longPressState.timer);
+  }
+  const longPressInfo = longPressState;
+  longPressState = null;
+
+  if (connectionGesture) {
+    removeConnectionListeners();
+    endConnectionGesture();
+    dragState = null;
+    return;
+  }
   const point = getClientPoint(e);
   if (!point) {
     dragState = null;
@@ -1178,7 +1675,79 @@ function onDragPointerUp(e) {
     tryCombineItem(dragState.items[0].el);
   }
 
+  if (
+    longPressInfo &&
+    longPressInfo.longPressed &&
+    longPressInfo.forSplit &&
+    (!dragState.moved || dragState.moved === false)
+  ) {
+    const target = document.elementFromPoint(point.x, point.y);
+    const chordEl = target ? target.closest(".item") : null;
+    if (chordEl === longPressInfo.el) {
+      selectedItems.clear();
+      selectedItems.add(chordEl);
+      updateSelectionStyles();
+      splitChordIntoNotes(chordEl);
+      dragState = null;
+      return;
+    }
+  }
+
+  renderConnections();
   dragState = null;
+}
+
+function onConnectionPointerMove(e) {
+  if (!connectionGesture) return;
+  const point = getClientPoint(e);
+  if (!point) return;
+  if (e.cancelable) e.preventDefault();
+
+  const dist = Math.hypot(
+    point.x - connectionGesture.startPoint.x,
+    point.y - connectionGesture.startPoint.y
+  );
+  if (dist > 6) connectionGesture.moved = true;
+
+  updateDraftLine(connectionGesture.anchor, point);
+  const target = document.elementFromPoint(point.x, point.y);
+  const hovered = target ? target.closest('.item') : null;
+  if (
+    hovered &&
+    (hovered.dataset.type === "note" || hovered.dataset.type === "chord") &&
+    itemsAreEquivalent(connectionGesture.baseEl, hovered)
+  ) {
+    advanceConnectionGesture(hovered);
+    connectionGesture.anchor = getRightmostMember(connectionGesture.members);
+    updateDraftLine(connectionGesture.anchor, point);
+  }
+}
+
+function onConnectionPointerUp(e) {
+  if (!connectionGesture) return;
+  removeConnectionListeners();
+  if (connectionGesture.members.size >= 2) {
+    finalizeConnectionChain(Array.from(connectionGesture.members));
+  } else if (
+    connectionGesture.trigger === "mouse" &&
+    !connectionGesture.moved
+  ) {
+    const point = getClientPoint(e);
+    const target = point ? document.elementFromPoint(point.x, point.y) : null;
+    const chordEl = target ? target.closest('.item') : null;
+    if (
+      chordEl &&
+      chordEl === connectionGesture.baseEl &&
+      chordEl.dataset.type === "chord"
+    ) {
+      selectedItems.clear();
+      selectedItems.add(chordEl);
+      updateSelectionStyles();
+      splitChordIntoNotes(chordEl);
+    }
+  }
+  endConnectionGesture();
+  renderConnections();
 }
 
 // Palette styling + drag
@@ -1434,6 +2003,9 @@ function startPlayback() {
   playButton.classList.add("playing");
   playButton.textContent = "■ Stop";
 
+  renderConnections();
+  connectionPlayState = new Map();
+
   const areaRect = playArea.getBoundingClientRect();
   const width = playArea.clientWidth;
   playedSet = new Set();
@@ -1457,7 +2029,12 @@ function startPlayback() {
       const centerX = r.left + r.width / 2 - areaRect.left;
       if (centerX <= x) {
         playedSet.add(el);
-        playElement(el);
+        const info = connectionLookup.get(el.dataset.itemId);
+        if (info) {
+          handleConnectionTrigger(info.connId, info.index, el);
+        } else {
+          playElement(el);
+        }
       }
     });
 
@@ -1478,6 +2055,7 @@ function stopPlayback() {
   playButton.textContent = "▶ Play";
   playHead.style.display = "none";
   playedSet = null;
+  stopConnectionVoices();
 }
 
 playButton.addEventListener("click", () => {
@@ -1491,6 +2069,7 @@ window.addEventListener("resize", () => {
     const top = parseFloat(el.style.top) || 0;
     positionItem(el, left, top);
   });
+  renderConnections();
 });
 
 // Keyboard shortcuts: Ctrl+C/V/Z and Space
