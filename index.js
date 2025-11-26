@@ -57,7 +57,7 @@ let itemIdCounter = 1;
 let connections = [];
 let connectionLookup = new Map();
 let connectionPlayState = new Map();
-let connectionDraft = null;
+let connectionDraft = { left: null, right: null };
 let connectionIdCounter = 1;
 let connectionGesture = null;
 let suppressContextMenu = false;
@@ -981,19 +981,12 @@ function getSortedConnectionElements(conn) {
     .sort((a, b) => getItemCenter(a).x - getItemCenter(b).x);
 }
 
-function getRightmostMember(memberSet) {
-  const members = Array.from(memberSet);
-  if (!members.length) return null;
-  return members.reduce((rightmost, el) => {
-    if (!rightmost) return el;
-    return getItemCenter(el).x > getItemCenter(rightmost).x ? el : rightmost;
-  }, null);
-}
-
 function renderConnections() {
   if (!connectionLayer) return;
   cleanConnections();
   connectionLookup = new Map();
+
+  const draftLines = Array.from(connectionLayer.querySelectorAll(".draft"));
 
   while (connectionLayer.firstChild) connectionLayer.removeChild(connectionLayer.firstChild);
 
@@ -1015,6 +1008,8 @@ function renderConnections() {
       connectionLayer.appendChild(line);
     }
   });
+
+  draftLines.forEach((line) => connectionLayer.appendChild(line));
 }
 
 function stopConnectionVoices() {
@@ -1062,27 +1057,87 @@ function handleConnectionTrigger(connId, index, el) {
   state.lastIndex = index;
 }
 
-function updateDraftLine(fromEl, point) {
-  if (!connectionLayer) return;
-  if (!connectionDraft) {
+function ensureDraftLine(side) {
+  if (!connectionLayer) return null;
+  if (!connectionDraft[side]) {
     const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
     line.classList.add("draft");
     connectionLayer.appendChild(line);
-    connectionDraft = line;
+    connectionDraft[side] = line;
+  }
+  return connectionDraft[side];
+}
+
+function updateDraftLines(gesture, point) {
+  if (!connectionLayer || !gesture || !gesture.members) return;
+
+  const members = Array.from(gesture.members);
+  if (!members.length) return;
+
+  const areaRect = playArea.getBoundingClientRect();
+  const cursor = {
+    x: point.x - areaRect.left,
+    y: point.y - areaRect.top
+  };
+
+  const anchorEl = gesture.lastConnected || gesture.anchor || members[0];
+  const anchorCenter = anchorEl ? getItemCenter(anchorEl) : null;
+
+  const sorted = members
+    .map((el) => ({ el, center: getItemCenter(el) }))
+    .sort((a, b) => a.center.x - b.center.x);
+
+  let left = null;
+  let right = null;
+
+  for (let i = 0; i < sorted.length; i++) {
+    const entry = sorted[i];
+    if (entry.center.x <= cursor.x) {
+      left = entry;
+    } else if (!right) {
+      right = entry;
+      break;
+    }
   }
 
-  const a = getItemCenter(fromEl);
-  connectionDraft.setAttribute("x1", a.x);
-  connectionDraft.setAttribute("y1", a.y);
-  connectionDraft.setAttribute("x2", point.x - playArea.getBoundingClientRect().left);
-  connectionDraft.setAttribute("y2", point.y - playArea.getBoundingClientRect().top);
+  if (!left && anchorCenter) {
+    left = { el: anchorEl, center: anchorCenter };
+  }
+  if (!right && anchorCenter && (!left || left.el !== anchorEl)) {
+    right = { el: anchorEl, center: anchorCenter };
+  }
+
+  const leftLine = left ? ensureDraftLine("left") : null;
+  const rightLine = right ? ensureDraftLine("right") : null;
+
+  if (leftLine && left) {
+    leftLine.setAttribute("x1", left.center.x);
+    leftLine.setAttribute("y1", left.center.y);
+    leftLine.setAttribute("x2", cursor.x);
+    leftLine.setAttribute("y2", cursor.y);
+  } else if (connectionDraft.left && connectionDraft.left.parentNode) {
+    connectionDraft.left.parentNode.removeChild(connectionDraft.left);
+    connectionDraft.left = null;
+  }
+
+  if (rightLine && right) {
+    rightLine.setAttribute("x1", right.center.x);
+    rightLine.setAttribute("y1", right.center.y);
+    rightLine.setAttribute("x2", cursor.x);
+    rightLine.setAttribute("y2", cursor.y);
+  } else if (connectionDraft.right && connectionDraft.right.parentNode) {
+    connectionDraft.right.parentNode.removeChild(connectionDraft.right);
+    connectionDraft.right = null;
+  }
 }
 
 function clearDraftLine() {
-  if (connectionDraft && connectionDraft.parentNode) {
-    connectionDraft.parentNode.removeChild(connectionDraft);
-  }
-  connectionDraft = null;
+  ["left", "right"].forEach((side) => {
+    if (connectionDraft[side] && connectionDraft[side].parentNode) {
+      connectionDraft[side].parentNode.removeChild(connectionDraft[side]);
+    }
+    connectionDraft[side] = null;
+  });
 }
 
 function finalizeConnectionChain(chainEls) {
@@ -1126,12 +1181,13 @@ function startConnectionGesture(el, point, { suppressContext = false, trigger = 
   connectionGesture = {
     members: new Set([el]),
     anchor: el,
+    lastConnected: el,
     baseEl: el,
     startPoint: point,
     moved: false,
     trigger
   };
-  updateDraftLine(el, point);
+  updateDraftLines(connectionGesture, point);
 }
 
 function advanceConnectionGesture(targetEl) {
@@ -1140,7 +1196,8 @@ function advanceConnectionGesture(targetEl) {
   if (!itemsAreEquivalent(connectionGesture.baseEl, targetEl)) return;
   connectionGesture.moved = true;
   connectionGesture.members.add(targetEl);
-  connectionGesture.anchor = getRightmostMember(connectionGesture.members);
+  connectionGesture.anchor = targetEl;
+  connectionGesture.lastConnected = targetEl;
   finalizeConnectionChain(Array.from(connectionGesture.members));
 }
 
@@ -1463,7 +1520,7 @@ function onDragPointerMove(e) {
   }
 
   if (connectionGesture) {
-    updateDraftLine(connectionGesture.anchor, point);
+    updateDraftLines(connectionGesture, point);
     return;
   }
   const dx = point.x - dragState.startX;
@@ -1709,7 +1766,7 @@ function onConnectionPointerMove(e) {
   );
   if (dist > 6) connectionGesture.moved = true;
 
-  updateDraftLine(connectionGesture.anchor, point);
+  updateDraftLines(connectionGesture, point);
   const target = document.elementFromPoint(point.x, point.y);
   const hovered = target ? target.closest('.item') : null;
   if (
@@ -1718,8 +1775,8 @@ function onConnectionPointerMove(e) {
     itemsAreEquivalent(connectionGesture.baseEl, hovered)
   ) {
     advanceConnectionGesture(hovered);
-    connectionGesture.anchor = getRightmostMember(connectionGesture.members);
-    updateDraftLine(connectionGesture.anchor, point);
+    connectionGesture.anchor = connectionGesture.lastConnected || hovered;
+    updateDraftLines(connectionGesture, point);
   }
 }
 
